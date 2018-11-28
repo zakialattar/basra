@@ -1,0 +1,79 @@
+%matplotlib notebook
+%matplotlib inline
+import numpy as np
+import dh_py_access.lib.datahub as datahub
+import xarray as xr
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from mpl_toolkits.basemap import Basemap
+import dh_py_access.package_api as package_api
+import matplotlib.colors as colors
+import warnings
+import shutil
+import imageio
+import os
+warnings.filterwarnings("ignore")
+
+
+# https://api.planetos.com/v1/datasets/ecmwf_era5/point?origin=dataset-details&lat=30.49495148037828&apikey=17c225b142474dc9a030e82b4ed99e2f&lon=47.81559912990019&var=2_metre_temperature_surface
+
+
+
+server = 'api.planetos.com'
+API_key = open('17c225b142474dc9a030e82b4ed99e2f').readlines()[0].strip()
+version = 'v1'
+
+
+dh = datahub.datahub(server,version,API_key)
+dataset = 'era5'
+variable_name1 = '2m_temp'
+
+
+
+package_cams = package_api.package_api(dh,dataset,variable_name1,longitude_west,longitude_east,latitude_south,latitude_north,area_name=area_name)
+
+
+package_cams.make_package()
+
+
+package_cams.download_package()
+
+
+dd1 = xr.open_dataset(package_cams.local_file_name)
+dd1['longitude'] = ((dd1.longitude+180) % 360) - 180
+dd1['pm2p5_micro'] = dd1.pm2p5 * 1000000000.
+dd1.pm2p5_micro.data[dd1.pm2p5_micro.data < 0] = np.nan
+
+m = Basemap(projection='merc', lat_0 = 55, lon_0 = -4,
+         resolution = 'i', area_thresh = 0.05,
+         llcrnrlon=longitude_west, llcrnrlat=latitude_south,
+         urcrnrlon=longitude_east, urcrnrlat=latitude_north)
+lons,lats = np.meshgrid(dd1.longitude.data,dd1.latitude.data)
+lonmap,latmap = m(lons,lats)
+
+:
+vmax = np.nanmax(dd1.pm2p5_micro.data)
+vmin = 2
+
+def loadimg(k):
+    fig=plt.figure(figsize=(10,7))
+    ax = fig.add_subplot(111)
+    pcm = m.pcolormesh(lonmap,latmap,dd1.pm2p5_micro.data[k],
+                norm = colors.LogNorm(vmin=vmin, vmax=vmax),cmap = 'rainbow')
+    ilat,ilon = np.unravel_index(np.nanargmax(dd1.pm2p5_micro.data[k]),dd1.pm2p5_micro.data[k].shape)
+    #m.plot(lonmap[ilat,ilon],latmap[ilat,ilon],'r')
+    m.scatter(lonmap[ilat,ilon],latmap[ilat,ilon],s=58,facecolors='none',edgecolors='r')
+
+    m.drawcoastlines()
+    m.drawcountries()
+    m.drawstates()
+    cbar = plt.colorbar(pcm,fraction=0.02, pad=0.040,ticks=[10**0, 10**1, 10**2,10**3])
+    cbar.ax.set_yticklabels([0,10,100,1000]) 
+    plt.title(str(dd1.pm2p5_micro.time[k].data)[:-10])
+    cbar.set_label('micrograms m^3')
+    print("Maximum: ","%.2f" % np.nanmax(dd1.pm2p5_micro.data[k]))
+
+    plt.show()
+widgets.interact(loadimg, k=widgets.IntSlider(min=0,max=(len(dd1.pm2p5_micro.data)-1),step=1,value=0, layout=widgets.Layout(width='100%')))
+
+loadimg(3)
